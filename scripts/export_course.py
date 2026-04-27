@@ -87,15 +87,15 @@ def _build_html(course_title: str, teacher: str, lectures: list[dict],
 def _build_plain(course_title: str, teacher: str, lectures: list[dict]) -> str:
     """Build a plain-text version of the summaries."""
     parts = [
-        f"课程：{course_title}",
+        f"# 课程：{course_title}",
         f"任课教师：{teacher}",
-        "=" * 40,
+        # "=" * 40,
     ]
     for lec in lectures:
-        parts.append(f"\n{'─' * 40}")
-        parts.append(f"{lec['sub_title']} ({lec['date']})")
-        parts.append("─" * 40)
-        parts.append(lec["summary"])
+        # parts.append(f"\n{'─' * 40}")
+        parts.append(f"## {lec['sub_title']} ({lec['date']})")
+        # parts.append("─" * 40)
+        # parts.append(lec["summary"])
     return "\n".join(parts)
 
 
