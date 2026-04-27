@@ -102,7 +102,7 @@ jobs:
             MD_FLAG="--md"
           fi
           if [ -n "$EXPORT_SUB_IDS" ]; then
-            python scripts/export_course.py --course-id "$EXPORT_COURSE_ID" --sub-ids "$EXPORT_SUB_IDS" $PDF_FLAG
+            python scripts/export_course.py --course-id "$EXPORT_COURSE_ID" --sub-ids "$EXPORT_SUB_IDS" $PDF_FLAG $MD_FLAG
           else
-            python scripts/export_course.py --course-id "$EXPORT_COURSE_ID" $PDF_FLAG
+            python scripts/export_course.py --course-id "$EXPORT_COURSE_ID" $PDF_FLAG $MD_FLAG
           fi
