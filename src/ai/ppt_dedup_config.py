@@ -22,7 +22,7 @@ SUBSET_CONFIG: dict = {
     "ngram_n": 3,                 # n-gram size for containment scoring
     "containment_threshold": 0.85,  # min n-gram containment to flag subset
     "min_length_ratio": 1.10,     # long/short length ratio must exceed this
-    "protect_min_chars": 30,      # pages shorter than this get a stricter 0.95 threshold
+    "protect_min_chars": 10,      # pages shorter than this get a stricter 0.95 threshold
 }
 
 # ── Full-page invalidation patterns (is_invalid_page) ───────────────────────
@@ -68,7 +68,6 @@ INVALID_PAGE_PATTERNS: list[str] = [
     "选择要上传的文件",
     "选择要打开的文件",
     "打开此文件",
-    "计算机",
     # ── Type 4: Windows lock screen / Ctrl+Alt+Delete ──
     "ctrlaltdel",
     "请按ctrlaltdelete",
@@ -80,6 +79,18 @@ INVALID_PAGE_PATTERNS: list[str] = [
     "正在关机",
     "放映结束单击鼠标退出",
     "要退出全屏请按",
+    # ── Type 7: browser / overlay / video-player full-screen noise ──
+    "要调出全屏",                                  # "要调出全屏，需接Esc"
+    "checkvideosource",                           # video player overlay
+    "无痕模式",                                    # browser incognito mode badge
+    # ── Type 8: WPS Office desktop (full-screen, no slide visible) ──
+    "wwpsoffice",
+    # ── Type 9: Chrome / browser chrome ──
+    "googlechrome不是您的默认浏览器",
+    # ── Type 10: WeChat file-helper URL ──
+    "filehelperweixinqqcom",
+    # ── Type 11: Tencent Docs online editor (full-screen) ──
+    "腾讯文档手机发令电脑自动干活",
 ]
 
 # ── Per-line noise stopwords (clean_ppt_text exact match) ───────────────────
@@ -192,9 +203,27 @@ PPT_UI_STOPWORDS: set[str] = {
     "回", "□",
     # ── PowerPoint thumbnail sidebar ├──
     "大纲视图",
+    # ── PowerPoint inking / drawing context toolbars ──
+    "墨迹书写工具",                                # inking contextual tab
+    "绘图工具",                                    # drawing tool contextual tab
     # ── Windows file-dialog chrome ──
     "打开", "保存", "取消",
     "搜索结果", "没有搜索到结果",
+    # ── Browser-based PDF toolbar buttons ──
+    "导出PDF", "编辑PDF", "创建PDF",
+    "合并文件", "整理页面", "添加注释",
+    # ── Tencent Docs online editor ──
+    "腾讯文档",
+    "手机发令，电脑自动干活",
+    "效率工具", "默认字体",
+    # ── WPS premium / features ──
+    "会员专享", "WPSAI",
+    # ── Academic database / reader UI ──
+    "文献解读", "文献评述",
+    # ── Video player overlay ──
+    "退出播放",
+    # ── OCR variant of existing stopwords ──
+    "aac替换",                                    # OCR variant of "ac替换"
 }
 
 # ── Per-line regex patterns (clean_ppt_text fullmatch) ──────────────────────
@@ -228,9 +257,10 @@ UI_NOISE_LINE_PATTERNS: list[str] = [
     r"^[A-Z][a-z]+University\)?$",
     # Truncated window titles (star + text): "☆..."
     r"^☆.{4,}.+$",
-    # Document window title: "...docx - Word", "...pptx - PowerPoint"
+    # Document window title: "...docx - Word", "...pptx - PowerPoint",
+    # also ".ppt[兼容模式]-PowerPoint" and ".ppt - PowerPoint"
     r"^.*\.docx[- ].*Word$",
-    r"^.*\.pptx[- ].*PowerPoint$",
+    r"^.*\.pptx?[^-]*[- ]*PowerPoint$",
     # PPT placeholder text
     r"^单击此处添加(?:备注|标题|副标题|正文)$",
     # Standalone PPT placeholder labels (appear in thumbnail sidebar / master view)
@@ -286,4 +316,10 @@ UI_NOISE_LINE_PATTERNS: list[str] = [
     r"^(名称|修改日期|类型|大小)\s+(名称|修改日期|类型|大小)",
     # PDF viewer / browser window title with file path
     r"^[①-⑩]?文件\|(?:C:|D:)?[/\\]Users[/\\]",
+    # Slash-separated date: "2026/4/13" (different from dash-separated above)
+    r"^\d{4}/\d{1,2}/\d{1,2}$",
+    # PowerPoint contextual tab label fused with adjacent number: "1文字方向"
+    r"^\d+文字方向$",
+    # Font dropdown: "Arial(标题）" or "Calibri(正文）"
+    r"^[A-Z][A-Za-z]+\s*[（(][^）)]{1,6}[）)]$",
 ]
