@@ -230,15 +230,17 @@ document.addEventListener("alpine:init", () => {
     exportDialogOpen: false, exportSelection: {}, exportingPdf: false,
     iterations: 100000, repoOwner: "", repoName: "", dataBranch: "data",
     _history: [],
-    /* Subscriptions editor state. ``subsSelectedIds`` is the working list
-       the user is editing; ``subsCurrentIds`` is the read-only snapshot
-       of what's actually deployed (from the courses table) so we can
-       offer a "reset" button. */
-    allCourses: [], allCoursesTerms: [],
-    subsTerm: "", subsSearch: "",
-    subsSelectedIds: [], subsCurrentIds: [], subsFiltered: [],
+    /* Subscriptions editor state — three-column layout:
+       left (subscribed) | middle (catalog search) | right (single-run).
+       The left column persists to GitHub Secret on demand; the right
+       column is session-only and cleared after triggering a workflow. */
+    allCourses: [], allCoursesTerms: [], allDepts: [],
+    subsTerm: "", subsDept: "", subsSearchTitle: "", subsSearchTeacher: "",
+    subscribedIds: [], singleRunIds: [],
+    subsSelLeft: [], subsSelMiddle: [], subsSelRight: [],
+    subsFiltered: [],
     subsSaving: false, subsError: "",
-    triggeringCheck: false,
+    singleRunTriggering: false,
     /* Per-browser pinned-courses set, lazily synced to localStorage. */
     starred: _loadStarred(),
 
@@ -584,79 +586,120 @@ document.addEventListener("alpine:init", () => {
       this.setup = { token: "", stuid: "", uispsw: "" };
     },
 
-    // ── Subscriptions editor ────────────────────────────────────────
+    // ── Subscriptions editor (three-column) ──────────────────────────
     openSubscriptions() {
-      // Pull the catalog + currently-subscribed list from the DB (sourced
-      // from the courses table; that's our best signal of "what's running"
-      // since GitHub never lets us read secret values back).  When the
-      // user just saved a new list this run, the localStorage cache wins
-      // — it reflects what was actually pushed to the secret, not the
-      // stale ``courses`` snapshot.
       this.allCourses = ICS.db.getAllCourses();
       this.allCoursesTerms = ICS.db.getAllCoursesTerms();
-      this.subsTerm = this.allCoursesTerms[0] || "";
-      this.subsSearch = "";
-      let current = ICS.db.getSubscribedCourseIds().map(String);
+      // Derive department list from catalog
+      var deptSet = new Set();
+      for (var i = 0; i < this.allCourses.length; i++) {
+        var d = this.allCourses[i].dept;
+        if (d) deptSet.add(d);
+      }
+      this.allDepts = Array.from(deptSet).sort();
+      this.subsTerm = "";
+      this.subsDept = "";
+      this.subsSearchTitle = "";
+      this.subsSearchTeacher = "";
+      this.singleRunIds = [];
+      this.subsSelLeft = [];
+      this.subsSelMiddle = [];
+      this.subsSelRight = [];
+      this.subsError = "";
+      // Load current subscription from localStorage (cached last-saved state)
+      var current = [];
       try {
-        const cached = JSON.parse(
+        var cached = JSON.parse(
           localStorage.getItem(_LS + "lastSubscribed") || "null"
         );
-        if (Array.isArray(cached) && cached.length) {
-          // Union — if a previously-subscribed course is also in the DB
-          // (workflow already ran for it) we keep it; if only in cache,
-          // also keep it so the user doesn't lose their pending save.
-          const seen = new Set(current.map(String));
-          for (const cid of cached) {
-            if (!seen.has(String(cid))) current.push(String(cid));
-          }
-        }
+        if (Array.isArray(cached)) current = cached.map(String);
       } catch {}
-      this.subsCurrentIds = current;
-      this.subsSelectedIds = this.subsCurrentIds.slice();
-      this.subsError = "";
+      // Fallback: if no cache, use the courses table as signal
+      if (!current.length) {
+        current = ICS.db.getSubscribedCourseIds().map(String);
+      }
+      this.subscribedIds = current;
       this.rebuildSubsFiltered();
       this.navigate("subscriptions");
     },
+    // ── Column data ─────────────────────────────────────────────────
     get allCoursesForTerm() {
       if (!this.subsTerm) return this.allCourses;
-      return this.allCourses.filter((c) => c.term === this.subsTerm);
+      return this.allCourses.filter(function (c) { return c.term === this.subsTerm; }, this);
     },
+    get subscribedCourses() {
+      var ids = new Set(this.subscribedIds.map(String));
+      return this.allCourses.filter(function (c) { return ids.has(String(c.course_id)); });
+    },
+    get singleRunCourses() {
+      var ids = new Set(this.singleRunIds.map(String));
+      return this.allCourses.filter(function (c) { return ids.has(String(c.course_id)); });
+    },
+    // ── Filter middle column ─────────────────────────────────────────
     rebuildSubsFiltered() {
-      const q = (this.subsSearch || "").trim().toLowerCase();
-      const list = this.allCoursesForTerm;
-      // Subscribed rows always float to the top so the user sees current
-      // selections without scrolling, regardless of search filter.
-      const selected = new Set(this.subsSelectedIds.map(String));
-      const ranked = list.map((c) => ({
-        c,
-        score: selected.has(String(c.course_id)) ? 0 : 1,
-      }));
-      const filtered = ranked.filter(({ c }) => {
-        if (!q) return true;
-        return [c.title, c.teacher, c.dept, c.course_id]
-          .filter(Boolean)
-          .some((s) => String(s).toLowerCase().includes(q));
+      var termQ = this.subsTerm;
+      var deptQ = (this.subsDept || "").trim().toLowerCase();
+      var titleQ = (this.subsSearchTitle || "").trim().toLowerCase();
+      var teacherQ = (this.subsSearchTeacher || "").trim().toLowerCase();
+      var list = termQ
+        ? this.allCourses.filter(function (c) { return c.term === termQ; })
+        : this.allCourses;
+      this.subsFiltered = list.filter(function (c) {
+        if (deptQ && (!c.dept || c.dept.toLowerCase().indexOf(deptQ) === -1)) return false;
+        if (titleQ && (!c.title || c.title.toLowerCase().indexOf(titleQ) === -1)) return false;
+        if (teacherQ && (!c.teacher || c.teacher.toLowerCase().indexOf(teacherQ) === -1)) return false;
+        return true;
       });
-      filtered.sort((a, b) => a.score - b.score
-        || String(a.c.title || "").localeCompare(String(b.c.title || "")));
-      this.subsFiltered = filtered.map(({ c }) => c);
     },
-    toggleSubscription(courseId, checked) {
-      const cid = String(courseId);
-      const cur = new Set(this.subsSelectedIds.map(String));
-      if (checked) cur.add(cid); else cur.delete(cid);
-      this.subsSelectedIds = Array.from(cur);
-      // No re-sort on toggle — keeps the just-clicked row stable so the
-      // user can rapidly toggle multiple rows without the UI jumping.
+    // ── Per-column multi-select ──────────────────────────────────────
+    _toggleSel(arr, id, checked) {
+      var cid = String(id);
+      var s = new Set(arr.map(String));
+      if (checked) s.add(cid); else s.delete(cid);
+      return Array.from(s);
     },
-    resetSubscriptionsToCurrent() {
-      this.subsSelectedIds = this.subsCurrentIds.slice();
-      this.subsError = "";
-      this.rebuildSubsFiltered();
+    toggleSelLeft(id, checked) {
+      this.subsSelLeft = this._toggleSel(this.subsSelLeft, id, checked);
     },
+    toggleSelMiddle(id, checked) {
+      this.subsSelMiddle = this._toggleSel(this.subsSelMiddle, id, checked);
+    },
+    toggleSelRight(id, checked) {
+      this.subsSelRight = this._toggleSel(this.subsSelRight, id, checked);
+    },
+    // ── Triangle-arrow operations ────────────────────────────────────
+    moveToSubscribed() {
+      var target = new Set(this.subscribedIds.map(String));
+      var selected = this.subsSelMiddle;
+      for (var i = 0; i < selected.length; i++) target.add(selected[i]);
+      this.subscribedIds = Array.from(target);
+      this.subsSelMiddle = [];
+    },
+    moveFromSubscribed() {
+      var target = new Set(this.subscribedIds.map(String));
+      var selected = this.subsSelLeft;
+      for (var i = 0; i < selected.length; i++) target.delete(selected[i]);
+      this.subscribedIds = Array.from(target);
+      this.subsSelLeft = [];
+    },
+    moveToSingleRun() {
+      var target = new Set(this.singleRunIds.map(String));
+      var selected = this.subsSelMiddle;
+      for (var i = 0; i < selected.length; i++) target.add(selected[i]);
+      this.singleRunIds = Array.from(target);
+      this.subsSelMiddle = [];
+    },
+    moveFromSingleRun() {
+      var target = new Set(this.singleRunIds.map(String));
+      var selected = this.subsSelRight;
+      for (var i = 0; i < selected.length; i++) target.delete(selected[i]);
+      this.singleRunIds = Array.from(target);
+      this.subsSelRight = [];
+    },
+    // ── Save left column to GitHub Secret ────────────────────────────
     async saveSubscriptions() {
       if (this.subsSaving) return;
-      const creds = _loadCreds();
+      var creds = _loadCreds();
       if (!creds?.token) {
         this.subsError = "未登录或 PAT 缺失。";
         return;
@@ -668,25 +711,17 @@ document.addEventListener("alpine:init", () => {
       this.subsSaving = true;
       this.subsError = "";
       try {
-        const written = await ICS.github.setCourseIdsSecret(
-          this.repoOwner, this.repoName, creds.token, this.subsSelectedIds,
+        var written = await ICS.github.setCourseIdsSecret(
+          this.repoOwner, this.repoName, creds.token, this.subscribedIds,
         );
         this._toast(
-          `已保存 ${written.split(",").filter(Boolean).length} 门课到 COURSE_IDS secret`,
+          "已保存 " + written.split(",").filter(Boolean).length + " 门课到 COURSE_IDS secret",
           "success",
         );
-        // Treat the saved state as the new "current" so subsequent
-        // re-opens of the editor compare against it correctly.  We don't
-        // re-fetch courses table — that updates only after the next
-        // workflow run creates the lectures.
-        this.subsCurrentIds = this.subsSelectedIds.slice();
-        // Remember the saved set across reloads so that if user re-opens
-        // the editor before a workflow run, they see what they just saved
-        // rather than the stale `courses` snapshot.
         try {
           localStorage.setItem(
             _LS + "lastSubscribed",
-            JSON.stringify(this.subsCurrentIds),
+            JSON.stringify(this.subscribedIds),
           );
         } catch {}
       } catch (e) {
@@ -695,28 +730,40 @@ document.addEventListener("alpine:init", () => {
         this.subsSaving = false;
       }
     },
-
-    async triggerCheckRun() {
-      // Fires the daily check workflow on demand so the user can see their
-      // newly-saved subscription list applied without waiting for the
-      // scheduled cron.
-      if (this.triggeringCheck) return;
-      const creds = _loadCreds();
+    // ── Single-run (right column) ────────────────────────────────────
+    async runSingleRunWorkflow() {
+      if (this.singleRunTriggering) return;
+      if (!this.singleRunIds.length) {
+        this._toast("单次运行列表为空", "error");
+        return;
+      }
+      var creds = _loadCreds();
       if (!creds?.token) {
         this.subsError = "未登录或 PAT 缺失。";
         return;
       }
-      this.triggeringCheck = true;
+      this.singleRunTriggering = true;
       this.subsError = "";
       try {
+        // Temporarily set COURSE_IDS to the single-run list, trigger,
+        // then restore.  This avoids a separate workflow input.
+        await ICS.github.setCourseIdsSecret(
+          this.repoOwner, this.repoName, creds.token, this.singleRunIds,
+        );
         await ICS.github.triggerCheckWorkflow(
           this.repoOwner, this.repoName, "main", creds.token,
         );
-        this._toast("已触发 workflow，请到 Actions 标签查看进度", "success");
+        this._toast(
+          "已触发单次运行，处理 " + this.singleRunIds.length + " 门课。请到 Actions 查看进度",
+          "success",
+        );
+        // Clear the basket
+        this.singleRunIds = [];
+        this.subsSelRight = [];
       } catch (e) {
         this.subsError = e?.message || "触发失败";
       } finally {
-        this.triggeringCheck = false;
+        this.singleRunTriggering = false;
       }
     },
 

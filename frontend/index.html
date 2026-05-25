@@ -448,57 +448,159 @@
     </div>
   </div>
 
-  <!-- ─── SUBSCRIPTIONS (course list + checkbox + save to GitHub Secret) ─── -->
-  <div x-show="view === 'subscriptions'" class="view-enter max-w-2xl mx-auto p-4">
+  <!-- ─── SUBSCRIPTIONS (three-column editor) ─── -->
+  <div x-show="view === 'subscriptions'" class="view-enter max-w-5xl mx-auto p-4">
 
     <!-- Empty catalog message -->
     <div x-show="allCourses.length === 0"
          class="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg p-4 text-sm leading-relaxed">
-      课程目录为空。请在仓库的 Actions secrets 里设置 <code class="bg-yellow-100 px-1 rounded">CRAWL_TERM</code>
-      （例如 <code class="bg-yellow-100 px-1 rounded">25</code>）并跑一次 workflow 来抓取学期课程目录。
+      课程目录为空。等待 workflow 跑一次完整的学期爬取后刷新。
     </div>
 
     <template x-if="allCourses.length > 0">
       <div>
-        <!-- Term selector + search -->
-        <div class="flex flex-col sm:flex-row gap-2 mb-3">
-          <select x-model="subsTerm" @change="rebuildSubsFiltered()"
-                  class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none">
-            <template x-for="t in allCoursesTerms" :key="t">
-              <option :value="t" x-text="'Term ' + t"></option>
-            </template>
-          </select>
-          <input x-model="subsSearch" @input="rebuildSubsFiltered()" type="text"
-                 placeholder="搜索课程名 / 老师 / 院系 / ID…"
-                 class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none">
+        <!-- ── Filter bar ── -->
+        <div class="flex flex-wrap gap-2 mb-4 items-end">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">学期</label>
+            <select x-model="subsTerm" @change="rebuildSubsFiltered()"
+                    class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none">
+              <option value="">全部学期</option>
+              <template x-for="t in allCoursesTerms" :key="t">
+                <option :value="t" x-text="t"></option>
+              </template>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">院系</label>
+            <select x-model="subsDept" @change="rebuildSubsFiltered()"
+                    class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none">
+              <option value="">全部院系</option>
+              <template x-for="d in allDepts" :key="d">
+                <option :value="d" x-text="d"></option>
+              </template>
+            </select>
+          </div>
+          <div class="flex-1 min-w-[120px]">
+            <label class="block text-xs text-gray-500 mb-1">课程名</label>
+            <input x-model="subsSearchTitle" @input="rebuildSubsFiltered()" type="text"
+                   placeholder="搜索…"
+                   class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none">
+          </div>
+          <div class="flex-1 min-w-[120px]">
+            <label class="block text-xs text-gray-500 mb-1">教师</label>
+            <input x-model="subsSearchTeacher" @input="rebuildSubsFiltered()" type="text"
+                   placeholder="搜索…"
+                   class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none">
+          </div>
         </div>
 
-        <p class="text-xs text-gray-500 mb-3">
-          已选 <span class="font-semibold text-blue-600" x-text="subsSelectedIds.length"></span>
-          / 目录共 <span x-text="allCoursesForTerm.length"></span> 门课。
-          <span class="text-gray-400">（点击复选框切换订阅；保存后会写入 GitHub Secret <code class="bg-gray-100 px-1 rounded">COURSE_IDS</code>。）</span>
-        </p>
+        <!-- ── Three columns ── -->
+        <div class="flex gap-0 items-stretch">
 
-        <!-- Course list -->
-        <div class="bg-white border border-gray-100 rounded-lg overflow-hidden divide-y divide-gray-100 max-h-[60vh] overflow-y-auto">
-          <template x-for="c in subsFiltered" :key="c.course_id + '@' + c.term">
-            <label class="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
-              <input type="checkbox" class="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-400"
-                     :checked="subsSelectedIds.includes(c.course_id)"
-                     @change="toggleSubscription(c.course_id, $event.target.checked)">
-              <div class="min-w-0 flex-1">
-                <p class="text-sm font-medium text-gray-800 truncate" x-text="c.title || '(no title)'"></p>
-                <p class="text-xs text-gray-500 mt-0.5">
-                  <span x-text="c.teacher || '—'"></span>
-                  <span x-show="c.dept" class="text-gray-400"> · <span x-text="c.dept"></span></span>
-                  <span class="text-gray-400"> · ID <span x-text="c.course_id"></span></span>
-                </p>
-              </div>
-            </label>
-          </template>
-          <p x-show="subsFiltered.length === 0" class="text-center text-gray-400 text-sm py-6">
-            没有匹配的课程。
-          </p>
+          <!-- LEFT: Subscribed -->
+          <div class="flex-1 min-w-0 flex flex-col">
+            <div class="flex items-center justify-between px-2 py-1.5">
+              <h3 class="text-sm font-semibold text-gray-700">已订阅</h3>
+              <span class="text-xs text-gray-400" x-text="subscribedIds.length + '门'"></span>
+            </div>
+            <div class="bg-white border border-gray-200 rounded-lg overflow-y-auto max-h-[55vh] divide-y divide-gray-100 flex-1">
+              <template x-for="c in subscribedCourses" :key="c.course_id">
+                <label class="flex items-start gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+                  <input type="checkbox" class="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-400"
+                         :checked="subsSelLeft.includes(c.course_id)"
+                         @change="toggleSelLeft(c.course_id, $event.target.checked)">
+                  <div class="min-w-0 flex-1">
+                    <p class="font-medium text-gray-800 truncate" x-text="c.title || '(无题)'"></p>
+                    <p class="text-xs text-gray-500 truncate">
+                      <span x-text="c.teacher || '—'"></span>
+                      <span x-show="c.dept" class="text-gray-400"> · <span x-text="c.dept"></span></span>
+                    </p>
+                  </div>
+                </label>
+              </template>
+              <p x-show="subscribedCourses.length === 0" class="text-center text-gray-400 text-xs py-8">暂无</p>
+            </div>
+          </div>
+
+          <!-- Arrows: left ↔ middle -->
+          <div class="flex flex-col justify-center px-1 gap-1">
+            <button @click="moveToSubscribed()" title="加入订阅"
+                    class="w-7 h-7 flex items-center justify-center rounded border border-gray-300 hover:bg-blue-50 text-gray-600 hover:text-blue-600 disabled:opacity-30"
+                    :disabled="subsSelMiddle.length === 0">
+              <span class="text-lg leading-none">◀</span>
+            </button>
+            <button @click="moveFromSubscribed()" title="移出订阅"
+                    class="w-7 h-7 flex items-center justify-center rounded border border-gray-300 hover:bg-orange-50 text-gray-600 hover:text-orange-600 disabled:opacity-30"
+                    :disabled="subsSelLeft.length === 0">
+              <span class="text-lg leading-none">▶</span>
+            </button>
+          </div>
+
+          <!-- MIDDLE: Catalog search results -->
+          <div class="flex-[2] min-w-0 flex flex-col">
+            <div class="flex items-center justify-between px-2 py-1.5">
+              <h3 class="text-sm font-semibold text-gray-700">搜索结果</h3>
+              <span class="text-xs text-gray-400" x-text="subsFiltered.length + '门'"></span>
+            </div>
+            <div class="bg-white border border-gray-200 rounded-lg overflow-y-auto max-h-[55vh] divide-y divide-gray-100 flex-1">
+              <template x-for="c in subsFiltered" :key="c.course_id + '@' + c.term">
+                <label class="flex items-start gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+                  <input type="checkbox" class="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-400"
+                         :checked="subsSelMiddle.includes(c.course_id)"
+                         @change="toggleSelMiddle(c.course_id, $event.target.checked)">
+                  <div class="min-w-0 flex-1">
+                    <p class="font-medium text-gray-800 truncate" x-text="c.title || '(无题)'"></p>
+                    <p class="text-xs text-gray-500 truncate">
+                      <span x-text="c.teacher || '—'"></span>
+                      <span x-show="c.dept" class="text-gray-400"> · <span x-text="c.dept"></span></span>
+                    </p>
+                  </div>
+                </label>
+              </template>
+              <p x-show="subsFiltered.length === 0" class="text-center text-gray-400 text-xs py-8">没有匹配的课程</p>
+            </div>
+          </div>
+
+          <!-- Arrows: middle ↔ right -->
+          <div class="flex flex-col justify-center px-1 gap-1">
+            <button @click="moveToSingleRun()" title="加入单次运行"
+                    class="w-7 h-7 flex items-center justify-center rounded border border-gray-300 hover:bg-green-50 text-gray-600 hover:text-green-600 disabled:opacity-30"
+                    :disabled="subsSelMiddle.length === 0">
+              <span class="text-lg leading-none">▶</span>
+            </button>
+            <button @click="moveFromSingleRun()" title="移出篮子"
+                    class="w-7 h-7 flex items-center justify-center rounded border border-gray-300 hover:bg-orange-50 text-gray-600 hover:text-orange-600 disabled:opacity-30"
+                    :disabled="subsSelRight.length === 0">
+              <span class="text-lg leading-none">◀</span>
+            </button>
+          </div>
+
+          <!-- RIGHT: Single-run basket -->
+          <div class="flex-1 min-w-0 flex flex-col">
+            <div class="flex items-center justify-between px-2 py-1.5">
+              <h3 class="text-sm font-semibold text-gray-700">单次运行</h3>
+              <span class="text-xs text-gray-400" x-text="singleRunIds.length + '门'"></span>
+            </div>
+            <div class="bg-white border border-gray-200 rounded-lg overflow-y-auto max-h-[55vh] divide-y divide-gray-100 flex-1">
+              <template x-for="c in singleRunCourses" :key="c.course_id">
+                <label class="flex items-start gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+                  <input type="checkbox" class="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-400"
+                         :checked="subsSelRight.includes(c.course_id)"
+                         @change="toggleSelRight(c.course_id, $event.target.checked)">
+                  <div class="min-w-0 flex-1">
+                    <p class="font-medium text-gray-800 truncate" x-text="c.title || '(无题)'"></p>
+                    <p class="text-xs text-gray-500 truncate">
+                      <span x-text="c.teacher || '—'"></span>
+                      <span x-show="c.dept" class="text-gray-400"> · <span x-text="c.dept"></span></span>
+                    </p>
+                  </div>
+                </label>
+              </template>
+              <p x-show="singleRunCourses.length === 0" class="text-center text-gray-400 text-xs py-8">空</p>
+            </div>
+          </div>
+
         </div>
 
         <!-- Save error -->
@@ -506,26 +608,24 @@
            class="text-sm text-red-600 bg-red-50 rounded-lg p-3 mt-3"></p>
 
         <!-- Action buttons -->
-        <div class="mt-4 flex flex-col sm:flex-row sm:items-center gap-2">
+        <div class="mt-4 flex flex-col sm:flex-row items-center gap-2">
           <button @click="saveSubscriptions()" :disabled="subsSaving"
-                  class="flex-1 bg-blue-500 text-white py-2.5 rounded-lg font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-2">
+                  class="px-5 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2">
             <div x-show="subsSaving" class="spinner !w-4 !h-4 !border-2 !border-white/30 !border-t-white"></div>
-            <span x-text="subsSaving ? '加密上传中…' : '保存到 GitHub Secret'"></span>
+            <span x-text="subsSaving ? '加密上传中…' : '保存订阅到 Secret'"></span>
           </button>
-          <button @click="resetSubscriptionsToCurrent()" :disabled="subsSaving"
-                  class="text-sm text-gray-500 underline disabled:opacity-50">
-            重置为当前已订阅
+          <button @click="runSingleRunWorkflow()" :disabled="singleRunTriggering || singleRunIds.length === 0"
+                  class="px-5 py-2.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 flex items-center gap-2">
+            <div x-show="singleRunTriggering" class="spinner !w-4 !h-4 !border-2 !border-white/30 !border-t-white"></div>
+            <span x-text="singleRunTriggering ? '触发中…' : '▶ 单次运行'"></span>
           </button>
+          <span class="text-xs text-gray-400 ml-2">
+            单次运行会触发 workflow 处理选中课程，结果发送到 RECEIVER_EMAIL。
+          </span>
         </div>
-        <button @click="triggerCheckRun()" :disabled="triggeringCheck"
-                class="w-full mt-2 bg-gray-100 text-gray-700 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 disabled:opacity-50 flex items-center justify-center gap-2">
-          <div x-show="triggeringCheck" class="spinner !w-4 !h-4 !border-2 !border-gray-400/30 !border-t-gray-700"></div>
-          <span x-text="triggeringCheck ? '触发中…' : '立即跑一次 workflow（使用当前 secret）'"></span>
-        </button>
-        <p class="text-xs text-gray-400 mt-2 leading-relaxed">
-          保存需要你的 GitHub PAT 具备 <strong>Secrets: Read and write</strong> 权限；
-          立即运行需要 <strong>Actions: Read and write</strong>。
-          COURSE_IDS 会被 libsodium sealed box 加密后才离开浏览器。
+
+        <p class="text-xs text-gray-400 mt-2">
+          保存需要 GitHub PAT 具备 <strong>Secrets: Read and write</strong> 权限。
         </p>
       </div>
     </template>
