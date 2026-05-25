@@ -127,12 +127,11 @@ const _DETAIL_VIEW_LABEL = {
 
 /* ── Sharded loading helpers ── */
 async function _loadShard(owner, repo, entry, password, token) {
-  // Hit cache first; on miss download → decrypt → gunzip and store the
-  // decompressed sqlite bytes (~4× compression ratio, well under IndexedDB
-  // quota for typical class sizes).
+  // Returns { bytes, downloaded: bool } — downloaded=true means we hit
+  // the network; false means IndexedDB cache hit (instant).
   var cacheKey = "shard:" + entry.sha;
   var cached = await _idbGet(cacheKey);
-  if (cached) return cached;
+  if (cached) return { bytes: cached, downloaded: false };
 
   var encBytes = await ICS.github.fetchBlobBytes(owner, repo, entry.sha, token);
   var gzipped = await ICS.crypto.decrypt(
@@ -145,7 +144,7 @@ async function _loadShard(owner, repo, entry, password, token) {
   }
   var dbBytes = await _gunzip(gzipped);
   await _idbPut(cacheKey, dbBytes);
-  return dbBytes;
+  return { bytes: dbBytes, downloaded: true };
 }
 
 async function _fetchAndDecryptIndex(owner, repo, indexSha, password, token) {
@@ -187,10 +186,10 @@ async function _loadFromShardManifest(manifest, owner, repo, password, token, pr
     try { localStorage.setItem(_LS + "indexSha", manifest.index.sha); } catch (e) {}
   }
 
-  // 2) Pull every shard (cache hits short-circuit, so only changed shards
-  //    actually download) and merge them into one in-memory DB.
+  // 2) Pull every shard — skip cache hits, download only changed ones.
   await ICS.db.initEmpty();
   var total = (index.shards || []).length;
+  var downloaded = 0;
   for (var i = 0; i < total; i++) {
     var shardMeta = index.shards[i];
     var entry = manifest.shards.find(function (s) { return s.name === shardMeta.name; });
@@ -198,10 +197,14 @@ async function _loadFromShardManifest(manifest, owner, repo, password, token, pr
       console.warn("Shard listed in index but missing from tree:", shardMeta.name);
       continue;
     }
-    if (progress) progress(i + 1, total, shardMeta.name);
-    var shardBytes = await _loadShard(owner, repo, entry, password, token);
-    await ICS.db.attachShard(shardBytes);
+    var result = await _loadShard(owner, repo, entry, password, token);
+    if (result.downloaded) {
+      downloaded++;
+      if (progress) progress(downloaded, total, shardMeta.name);
+    }
+    await ICS.db.attachShard(result.bytes);
   }
+  if (progress && downloaded === 0) progress(0, total, "");
 
   // 3) Cache the merged DB in IndexedDB so next load with the same commit
   //    SHA skips EVERYTHING — no index fetch, no shard iteration, no merge.
@@ -287,13 +290,17 @@ document.addEventListener("alpine:init", () => {
           this.loadingMsg = "Deriving decryption key...";
           var pw = await ICS.crypto.buildPasswordV2(creds);
 
-          this.loadingMsg = "Downloading + decrypting shard index...";
+          this.loadingMsg = "Loading index...";
           var self = this;
           await _loadFromShardManifest(
             manifest, this.repoOwner, this.repoName, pw, creds.token,
             function (i, n, name) {
-              self.loadingMsg = "Shard " + i + "/" + n
-                + " — downloading + decrypting (" + name + ")...";
+              if (i === 0) {
+                self.loadingMsg = "All " + n + " shards unchanged — instant load.";
+              } else {
+                self.loadingMsg = "Downloading shard " + i + "/" + n
+                  + " (" + name + ")...";
+              }
             },
           );
         } else {
@@ -606,8 +613,16 @@ document.addEventListener("alpine:init", () => {
 
     // ── Subscriptions editor (three-column) ──────────────────────────
     openSubscriptions() {
+      // Debug: log entry
+      console.log("openSubscriptions called, view=", this.view);
       // Enter the page FIRST — before any DB work.
-      this._go("subscriptions");
+      try {
+        this._go("subscriptions");
+        console.log("_go returned, view now=", this.view);
+      } catch(e) {
+        console.error("_go failed:", e);
+        return;
+      }
 
       this.allCoursesTerms = ICS.db.getAllCoursesTerms();
       this.subsTerms = [];
