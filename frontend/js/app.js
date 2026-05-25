@@ -649,18 +649,45 @@ document.addEventListener("alpine:init", () => {
       this.rebuildSubsFiltered();
       this.navigate("subscriptions");
     },
-    // ── Load courses for selected terms (not all 20k) ──────────────
+    // ── Async batch-load courses to avoid freezing the UI ───────────
     _loadCoursesForTerms() {
+      var self = this;
       var terms = this.subsTerms.length
         ? this.subsTerms
         : this.allCoursesTerms;
-      var all = [];
-      for (var i = 0; i < terms.length; i++) {
-        var rows = ICS.db.getAllCourses(terms[i]);
-        for (var j = 0; j < rows.length; j++) all.push(rows[j]);
-      }
-      this.allCourses = all;
+      this.allCourses = [];
       this.rebuildSubsFiltered();
+
+      var tIdx = 0;
+      var rowIdx = 0;
+      var currentRows = [];
+      var CHUNK = 500;
+
+      function loadChunk() {
+        if (tIdx >= terms.length) {
+          // Done — flush remaining
+          if (currentRows.length) {
+            self.allCourses = self.allCourses.concat(currentRows);
+            self.rebuildSubsFiltered();
+          }
+          return;
+        }
+        if (!currentRows.length) {
+          currentRows = ICS.db.getAllCourses(terms[tIdx]);
+          rowIdx = 0;
+        }
+        var chunk = currentRows.slice(rowIdx, rowIdx + CHUNK);
+        rowIdx += chunk.length;
+        if (rowIdx >= currentRows.length) {
+          tIdx++;
+          currentRows = [];
+        }
+        self.allCourses = self.allCourses.concat(chunk);
+        self.rebuildSubsFiltered();
+        setTimeout(loadChunk, 0);
+      }
+
+      loadChunk();
     },
     // ── Term badge color (cyclic palette for the search results) ─────
     _TERM_COLORS: [
