@@ -234,8 +234,10 @@ document.addEventListener("alpine:init", () => {
        left (subscribed) | middle (catalog search) | right (single-run).
        The left column persists to GitHub Secret on demand; the right
        column is session-only and cleared after triggering a workflow. */
-    allCourses: [], allCoursesTerms: [], allDepts: [],
-    subsTerm: "", subsDept: "", subsSearchTitle: "", subsSearchTeacher: "",
+    allCourses: [], allCoursesTerms: [],
+    subsTerms: [], subsDepts: [], deptSearchQuery: "",
+    subsSearchTitle: "", subsSearchTeacher: "",
+    subsTermOpen: false, subsDeptOpen: false,
     subscribedIds: [], singleRunIds: [],
     subsSelLeft: [], subsSelMiddle: [], subsSelRight: [],
     subsFiltered: [],
@@ -588,19 +590,18 @@ document.addEventListener("alpine:init", () => {
 
     // ── Subscriptions editor (three-column) ──────────────────────────
     openSubscriptions() {
-      this.allCourses = ICS.db.getAllCourses();
       this.allCoursesTerms = ICS.db.getAllCoursesTerms();
-      // Derive department list from catalog
-      var deptSet = new Set();
-      for (var i = 0; i < this.allCourses.length; i++) {
-        var d = this.allCourses[i].dept;
-        if (d) deptSet.add(d);
-      }
-      this.allDepts = Array.from(deptSet).sort();
-      this.subsTerm = "";
-      this.subsDept = "";
+      // Default: select the first term and load its courses only
+      // (loading all 20k+ courses at once would freeze the UI).
+      this.subsTerms = this.allCoursesTerms.length
+        ? [this.allCoursesTerms[0]] : [];
+      this.subsDepts = [];
+      this.deptSearchQuery = "";
       this.subsSearchTitle = "";
       this.subsSearchTeacher = "";
+      this.subsTermOpen = false;
+      this.subsDeptOpen = false;
+      this._loadCoursesForTerms();
       this.singleRunIds = [];
       this.subsSelLeft = [];
       this.subsSelMiddle = [];
@@ -622,11 +623,21 @@ document.addEventListener("alpine:init", () => {
       this.rebuildSubsFiltered();
       this.navigate("subscriptions");
     },
-    // ── Column data ─────────────────────────────────────────────────
-    get allCoursesForTerm() {
-      if (!this.subsTerm) return this.allCourses;
-      return this.allCourses.filter(function (c) { return c.term === this.subsTerm; }, this);
+    // ── Load courses for selected terms (not all 20k) ──────────────
+    _loadCoursesForTerms() {
+      var ids = new Set(this.subsTerms);
+      var all = [];
+      for (var i = 0; i < this.allCoursesTerms.length; i++) {
+        var t = this.allCoursesTerms[i];
+        if (ids.size === 0 || ids.has(t)) {
+          var rows = ICS.db.getAllCourses(t);
+          for (var j = 0; j < rows.length; j++) all.push(rows[j]);
+        }
+      }
+      this.allCourses = all;
+      this.rebuildSubsFiltered();
     },
+    // ── Column data ─────────────────────────────────────────────────
     get subscribedCourses() {
       var ids = new Set(this.subscribedIds.map(String));
       return this.allCourses.filter(function (c) { return ids.has(String(c.course_id)); });
@@ -635,17 +646,44 @@ document.addEventListener("alpine:init", () => {
       var ids = new Set(this.singleRunIds.map(String));
       return this.allCourses.filter(function (c) { return ids.has(String(c.course_id)); });
     },
+    // ── Dropdown labels ─────────────────────────────────────────────
+    get subsTermLabel() {
+      if (!this.subsTerms.length) return '全部学期';
+      return this.subsTerms.length + '个学期';
+    },
+    get subsDeptLabel() {
+      if (!this.subsDepts.length) return '全部院系';
+      return this.subsDepts.length + '个院系';
+    },
+    get subsDeptFiltered() {
+      var q = (this.deptSearchQuery || '').toLowerCase();
+      var deptSet = new Set();
+      for (var i = 0; i < this.allCourses.length; i++) {
+        var d = this.allCourses[i].dept;
+        if (d && (!q || d.toLowerCase().indexOf(q) !== -1)) deptSet.add(d);
+      }
+      return Array.from(deptSet).sort();
+    },
+    // ── Toggle multi-select ─────────────────────────────────────────
+    toggleSubsTerm(term, checked) {
+      var s = new Set(this.subsTerms);
+      if (checked) s.add(term); else s.delete(term);
+      this.subsTerms = Array.from(s);
+      this._loadCoursesForTerms();
+    },
+    toggleSubsDept(dept, checked) {
+      var s = new Set(this.subsDepts);
+      if (checked) s.add(dept); else s.delete(dept);
+      this.subsDepts = Array.from(s);
+      this.rebuildSubsFiltered();
+    },
     // ── Filter middle column ─────────────────────────────────────────
     rebuildSubsFiltered() {
-      var termQ = this.subsTerm;
-      var deptQ = (this.subsDept || "").trim().toLowerCase();
+      var deptSet = new Set(this.subsDepts.map(function (d) { return d.toLowerCase(); }));
       var titleQ = (this.subsSearchTitle || "").trim().toLowerCase();
       var teacherQ = (this.subsSearchTeacher || "").trim().toLowerCase();
-      var list = termQ
-        ? this.allCourses.filter(function (c) { return c.term === termQ; })
-        : this.allCourses;
-      this.subsFiltered = list.filter(function (c) {
-        if (deptQ && (!c.dept || c.dept.toLowerCase().indexOf(deptQ) === -1)) return false;
+      this.subsFiltered = this.allCourses.filter(function (c) {
+        if (deptSet.size && (!c.dept || !deptSet.has(c.dept.toLowerCase()))) return false;
         if (titleQ && (!c.title || c.title.toLowerCase().indexOf(titleQ) === -1)) return false;
         if (teacherQ && (!c.teacher || c.teacher.toLowerCase().indexOf(teacherQ) === -1)) return false;
         return true;
