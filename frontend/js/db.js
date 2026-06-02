@@ -173,19 +173,22 @@ function _searchSummaries(query) {
   const q = query;
   return _queryAll(`
     SELECT l.sub_id, l.sub_title, l.summary, l.transcript,
+           (SELECT pp.text FROM ppt_pages pp WHERE pp.sub_id = l.sub_id AND pp.text LIKE '%' || ? || '%' LIMIT 1) AS ppt_text,
            l.course_id, c.title AS course_title,
            CASE
              WHEN l.summary    LIKE '%' || ? || '%' THEN 'summary'
              WHEN l.sub_title  LIKE '%' || ? || '%' THEN 'sub_title'
              WHEN l.transcript LIKE '%' || ? || '%' THEN 'transcript'
+             WHEN EXISTS(SELECT 1 FROM ppt_pages pp2 WHERE pp2.sub_id = l.sub_id AND pp2.text LIKE '%' || ? || '%') THEN 'ocr'
              ELSE 'other'
            END AS hit_field
     FROM lectures l JOIN courses c ON l.course_id = c.course_id
     WHERE l.summary    LIKE '%' || ? || '%'
        OR l.sub_title  LIKE '%' || ? || '%'
        OR l.transcript LIKE '%' || ? || '%'
+       OR EXISTS(SELECT 1 FROM ppt_pages pp3 WHERE pp3.sub_id = l.sub_id AND pp3.text LIKE '%' || ? || '%')
     ORDER BY l.processed_at DESC LIMIT 50
-  `, [q, q, q, q, q, q]);
+  `, [q, q, q, q, q, q, q, q, q]);
 }
 
 function _getAllCourses(term) {
