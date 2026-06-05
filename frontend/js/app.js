@@ -603,21 +603,10 @@ document.addEventListener("alpine:init", () => {
       try {
         var currentCid = this.currentCourse ? String(this.currentCourse.course_id) : null;
         var selectedSubIds = selected.map(function (l) { return String(l.sub_id); });
-        var allLectures = this.lectures || [];
-        var deletingAll = selectedSubIds.length >= allLectures.length;
-
-        if (deletingAll) {
-          // Removing the entire course — update COURSE_IDS secret
-          var currentIds = ICS.db.getSubscribedCourseIds();
-          if (currentCid && currentIds) {
-            var newIds = currentIds.filter(function (id) { return String(id) !== currentCid; });
-            await ICS.github.setCourseIdsSecret(this.repoOwner, this.repoName, creds.token, newIds);
-          }
-        }
 
         await ICS.github.triggerDeleteWorkflow(
           this.repoOwner, this.repoName, "main", creds.token,
-          [currentCid], deletingAll ? [] : selectedSubIds,
+          [currentCid], selectedSubIds,
         );
         this.deleteDialogOpen = false;
         this._toast("已触发删除 workflow，数据将在几分钟内从远端清除", "success");
