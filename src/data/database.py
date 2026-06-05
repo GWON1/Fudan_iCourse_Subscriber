@@ -220,13 +220,6 @@ class Database:
                 (transcript, sub_id),
             )
 
-    def update_summary(self, sub_id: str, summary: str):
-        with self.conn:
-            self.conn.execute(
-                "UPDATE lectures SET summary = ? WHERE sub_id = ?",
-                (summary, sub_id),
-            )
-
     def mark_processed(self, sub_id: str):
         with self.conn:
             self.conn.execute(
@@ -271,14 +264,6 @@ class Database:
                    SET error_stage = NULL, error_msg = NULL, error_count = 0
                    WHERE sub_id = ?""",
                 (sub_id,),
-            )
-
-    def update_summary_with_model(self, sub_id: str, summary: str, model: str):
-        """Save summary and the model that produced it."""
-        with self.conn:
-            self.conn.execute(
-                "UPDATE lectures SET summary = ?, summary_model = ? WHERE sub_id = ?",
-                (summary, model, sub_id),
             )
 
     def update_ppt_page(self, sub_id: str, page_num: int,
