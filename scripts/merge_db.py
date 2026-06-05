@@ -87,39 +87,14 @@ def merge(local_path: str, remote_path: str):
                 WHERE main.lectures.sub_id = l.sub_id
             """)
 
-            # 4) PPT pages: insert local-only rows
+            # 4) PPT pages: insert local-only rows.  Existing rows are left
+            # untouched — if it's already in the remote DB the previous run
+            # already handled it, and we have no business second-guessing.
             conn.execute("""
                 INSERT OR IGNORE INTO main.ppt_pages
                     (sub_id, page_num, created_sec, pptimgurl, text, ocr_status, ocr_at, dhash)
                 SELECT sub_id, page_num, created_sec, pptimgurl, text, ocr_status, ocr_at, dhash
                 FROM local.ppt_pages
-            """)
-
-            # 5) PPT pages: merge existing rows.
-            #    Status priority: 'done' > 'invalid' > 'dedup_dropped' > 'failed' > 'pending'.
-            #    Text wins if non-null on either side (a 'done' row's text is preferred,
-            #    but COALESCE handles the rare case of done-without-text gracefully).
-            conn.execute("""
-                UPDATE main.ppt_pages SET
-                    text = COALESCE(l.text, main.ppt_pages.text),
-                    ocr_status = CASE
-                        WHEN l.ocr_status = 'done' OR main.ppt_pages.ocr_status = 'done'
-                            THEN 'done'
-                        WHEN l.ocr_status = 'invalid' OR main.ppt_pages.ocr_status = 'invalid'
-                            THEN 'invalid'
-                        WHEN l.ocr_status = 'dedup_dropped' OR main.ppt_pages.ocr_status = 'dedup_dropped'
-                            THEN 'dedup_dropped'
-                        WHEN l.ocr_status = 'failed' OR main.ppt_pages.ocr_status = 'failed'
-                            THEN 'failed'
-                        ELSE 'pending'
-                    END,
-                    ocr_at = COALESCE(l.ocr_at, main.ppt_pages.ocr_at),
-                    created_sec = COALESCE(l.created_sec, main.ppt_pages.created_sec),
-                    pptimgurl = COALESCE(l.pptimgurl, main.ppt_pages.pptimgurl),
-                    dhash = COALESCE(l.dhash, main.ppt_pages.dhash)
-                FROM local.ppt_pages l
-                WHERE main.ppt_pages.sub_id = l.sub_id
-                  AND main.ppt_pages.page_num = l.page_num
             """)
 
             # 6) all_courses (catalog): upsert local rows into remote.  We take
