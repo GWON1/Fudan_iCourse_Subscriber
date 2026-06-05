@@ -328,17 +328,22 @@ async function _triggerCheckWorkflow(owner, repo, ref, token) {
   throw new Error(`GitHub API error ${res.status}: ${body}`);
 }
 
-async function _triggerDeleteWorkflow(owner, repo, ref, token, courseIds) {
+async function _triggerDeleteWorkflow(owner, repo, ref, token, courseIds, subIds) {
   const url = `${_GH_API}/repos/${owner}/${repo}/actions/workflows/delete_course.yml/dispatches`;
   const ids = (Array.isArray(courseIds) ? courseIds : [])
     .map(String).map((s) => s.trim()).filter(Boolean).join(",");
   if (!ids) throw new Error("删除列表为空");
+  var inputs = { course_ids: ids };
+  if (subIds && subIds.length) {
+    inputs.sub_ids = (Array.isArray(subIds) ? subIds : [])
+      .map(String).map((s) => s.trim()).filter(Boolean).join(",");
+  }
   const res = await fetch(url, {
     method: "POST",
     headers: { ..._ghHeaders(token), "Content-Type": "application/json" },
     body: JSON.stringify({
       ref: ref || "main",
-      inputs: { course_ids: ids },
+      inputs: inputs,
     }),
   });
   if (res.status === 204) return;

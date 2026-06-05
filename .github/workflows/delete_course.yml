@@ -7,6 +7,11 @@ on:
         description: "Course ID(s) to delete, comma-separated (e.g. 30004 or 30004,30005)"
         required: true
         type: string
+      sub_ids:
+        description: "Optional lecture sub_id(s) to delete within the course (comma-separated). If omitted, deletes the entire course."
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -53,26 +58,45 @@ jobs:
             exit 1
           fi
 
-      - name: Delete course data
+      - name: Delete lecture(s) or course(s)
         run: |
-          IFS=',' read -ra IDS <<< "${{ inputs.course_ids }}"
-          for cid in "${IDS[@]}"; do
+          SUB_IDS="${{ inputs.sub_ids }}"
+          IFS=',' read -ra CIDS <<< "${{ inputs.course_ids }}"
+          for cid in "${CIDS[@]}"; do
             cid=$(echo "$cid" | xargs)
-            echo "Deleting course $cid..."
-            count=$(sqlite3 data/icourse.db "SELECT COUNT(*) FROM lectures WHERE course_id='$cid'")
-            sqlite3 data/icourse.db "DELETE FROM ppt_pages WHERE sub_id IN (SELECT sub_id FROM lectures WHERE course_id='$cid')"
-            sqlite3 data/icourse.db "DELETE FROM lectures WHERE course_id='$cid'"
-            sqlite3 data/icourse.db "DELETE FROM courses WHERE course_id='$cid'"
-            echo "  Removed $count lecture(s) for course $cid"
+            if [ -n "$SUB_IDS" ]; then
+              echo "Deleting specific lecture(s) from course $cid..."
+              IFS=',' read -ra SIDS <<< "$SUB_IDS"
+              for sid in "${SIDS[@]}"; do
+                sid=$(echo "$sid" | xargs)
+                echo "  Deleting lecture $sid..."
+                sqlite3 data/icourse.db "DELETE FROM ppt_pages WHERE sub_id='$sid'"
+                sqlite3 data/icourse.db "DELETE FROM lectures WHERE sub_id='$sid'"
+              done
+              remaining=$(sqlite3 data/icourse.db "SELECT COUNT(*) FROM lectures WHERE course_id='$cid'")
+              echo "  $remaining lecture(s) remaining for course $cid"
+              if [ "$remaining" -eq 0 ]; then
+                sqlite3 data/icourse.db "DELETE FROM courses WHERE course_id='$cid'"
+                echo "  Course $cid removed (no lectures left)"
+              fi
+            else
+              echo "Deleting entire course $cid..."
+              count=$(sqlite3 data/icourse.db "SELECT COUNT(*) FROM lectures WHERE course_id='$cid'")
+              sqlite3 data/icourse.db "DELETE FROM ppt_pages WHERE sub_id IN (SELECT sub_id FROM lectures WHERE course_id='$cid')"
+              sqlite3 data/icourse.db "DELETE FROM lectures WHERE course_id='$cid'"
+              sqlite3 data/icourse.db "DELETE FROM courses WHERE course_id='$cid'"
+              echo "  Removed $count lecture(s) for course $cid"
+            fi
           done
 
-      - name: Remove from COURSE_IDS secret
+      - name: Remove course from COURSE_IDS secret (only when entire course deleted)
+        if: ${{ inputs.sub_ids == '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          IFS=',' read -ra IDS <<< "${{ inputs.course_ids }}"
+          IFS=',' read -ra CIDS <<< "${{ inputs.course_ids }}"
           current=$(gh secret list --repo ${{ github.repository }} --json name,value | jq -r '.[] | select(.name=="COURSE_IDS") | .value' 2>/dev/null || echo "")
-          for cid in "${IDS[@]}"; do
+          for cid in "${CIDS[@]}"; do
             cid=$(echo "$cid" | xargs)
             current=$(echo "$current" | tr ',' '\n' | grep -v "^$cid$" | tr '\n' ',' | sed 's/,$//' | sed 's/^,//')
           done
@@ -89,5 +113,5 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add -A
-          git commit -m "chore: delete course(s) ${{ inputs.course_ids }}" || echo "No changes"
+          git commit -m "chore: delete ${{ inputs.sub_ids != '' && 'lecture(s)' || 'course(s)' }} ${{ inputs.sub_ids || inputs.course_ids }}" || echo "No changes"
           git push origin HEAD:data
