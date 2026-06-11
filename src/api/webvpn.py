@@ -182,12 +182,20 @@ class WebVPNSession:
         password = password or config.PASSWORD
 
         print("[*] Starting iCourse CAS authentication through WebVPN...")
+
+        # Pre-flight: probe the WebVPN portal.  A cold session redirects to
+        # /login instantly (status 302); a hot session returns 200.  Fail
+        # fast on cold — login_with_retry() in main.py will re-login.
+        warmup = self.session.get(
+            config.WEBVPN_BASE + "/", allow_redirects=False, timeout=5,
+        )
+        if warmup.status_code != 200:
+            raise RuntimeError("WebVPN session cold — re-login needed")
+
         idp_vpn_base = get_vpn_url(config.IDP_BASE)
 
-        # Step 1: Initiate CAS login via casapi — let requests follow
-        # redirects like a browser.  If the WebVPN session is cold, the
-        # /login bounce transparently re-establishes it; requests follows
-        # the chain to the IDP login page where lck is always present.
+        # Step 1: Initiate CAS login via casapi.  Use allow_redirects=True
+        # so requests follows the full redirect chain like a browser.
         print("[1/7] Initiating CAS login via casapi...")
         casapi_url = (
             f"{config.ICOURSE_BASE}/casapi/index.php"
