@@ -32,11 +32,47 @@ def _ensure_schema(conn: sqlite3.Connection):
             conn.execute(f"ALTER TABLE ppt_pages ADD COLUMN {col} {typedef}")
 
 
+def _migrate_attached(conn: sqlite3.Connection, schema: str):
+    """Bring an ATTACHed database up to the current column set.
+
+    The merge below SELECTs migration columns (e.g. ``dhash``) from the
+    local side; a local DB written by an older code version would make
+    those statements crash with "no such column".  ALTER TABLE works on
+    attached schemas, so pad the missing columns with NULLs first.
+    """
+    for table, cols in (
+        ("lectures", LECTURES_MIGRATION_COLUMNS),
+        ("ppt_pages", PPT_PAGES_MIGRATION_COLUMNS),
+    ):
+        existing = {
+            r[1] for r in conn.execute(f"PRAGMA {schema}.table_info({table})")
+        }
+        if not existing:
+            continue  # table absent entirely; nothing to pad
+        for col, typedef in cols:
+            if col not in existing:
+                conn.execute(
+                    f"ALTER TABLE {schema}.{table} ADD COLUMN {col} {typedef}"
+                )
+
+
+# OCR status lattice: a row may only move up.  'pending' is the implicit
+# bottom so any settled status from the other side wins over it.
+_PPT_STATUS_RANK = """CASE {col}
+        WHEN 'done' THEN 4
+        WHEN 'invalid' THEN 3
+        WHEN 'dedup_dropped' THEN 2
+        WHEN 'failed' THEN 1
+        ELSE 0
+    END"""
+
+
 def merge(local_path: str, remote_path: str):
     """Merge local changes into remote DB.  Only adds/progresses, never deletes."""
     conn = sqlite3.connect(remote_path)
     _ensure_schema(conn)
     conn.execute("ATTACH DATABASE ? AS local", (local_path,))
+    _migrate_attached(conn, "local")
 
     try:
         with conn:
@@ -87,14 +123,29 @@ def merge(local_path: str, remote_path: str):
                 WHERE main.lectures.sub_id = l.sub_id
             """)
 
-            # 4) PPT pages: insert local-only rows.  Existing rows are left
-            # untouched — if it's already in the remote DB the previous run
-            # already handled it, and we have no business second-guessing.
+            # 4) PPT pages: insert local-only rows, then progress existing
+            #    rows forward.  A remote row can hold a placeholder status
+            #    ('pending'/'failed') pushed by a concurrent or crashed run;
+            #    if the local side settled the same page higher up the
+            #    lattice (done > invalid > dedup_dropped > failed), its
+            #    text/status must win or the OCR result is silently lost.
             conn.execute("""
                 INSERT OR IGNORE INTO main.ppt_pages
                     (sub_id, page_num, created_sec, pptimgurl, text, ocr_status, ocr_at, dhash)
                 SELECT sub_id, page_num, created_sec, pptimgurl, text, ocr_status, ocr_at, dhash
                 FROM local.ppt_pages
+            """)
+            conn.execute(f"""
+                UPDATE main.ppt_pages SET
+                    text       = l.text,
+                    ocr_status = l.ocr_status,
+                    ocr_at     = COALESCE(l.ocr_at, main.ppt_pages.ocr_at),
+                    dhash      = COALESCE(l.dhash, main.ppt_pages.dhash)
+                FROM local.ppt_pages l
+                WHERE main.ppt_pages.sub_id = l.sub_id
+                  AND main.ppt_pages.page_num = l.page_num
+                  AND {_PPT_STATUS_RANK.format(col="l.ocr_status")}
+                    > {_PPT_STATUS_RANK.format(col="main.ppt_pages.ocr_status")}
             """)
 
             # 6) all_courses (catalog): upsert local rows into remote.  We take
