@@ -39,9 +39,9 @@ MODEL_PROVIDERS: list[dict] = [
         "name": "modelscope",
         "api_key_env": "DASHSCOPE_API_KEY",
         "base_url_env": "DASHSCOPE_BASE_URL",
-        "default_base_url": "https://api-inference.modelscope.cn/v1/",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1"
         "models": [
-            "Qwen/Qwen2.5-72B-Instruct",
+            "qwen-max"
         ],
     },
     {
